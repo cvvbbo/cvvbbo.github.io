@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Open Native Page</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --text: #1f2937;
+      --subtle: #6b7280;
+      --accent: #0f172a;
+      --accent-pressed: #334155;
+      --shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at top, rgba(148, 163, 184, 0.22), transparent 32%),
+        linear-gradient(180deg, #f8fafc 0%, var(--bg) 100%);
+      color: var(--text);
+    }
+
+    .panel {
+      width: min(100%, 360px);
+      padding: 28px 24px;
+      border-radius: 24px;
+      background: var(--card);
+      box-shadow: var(--shadow);
+      text-align: center;
+    }
+
+    .icon-button {
+      width: 96px;
+      height: 96px;
+      border: 0;
+      border-radius: 28px;
+      cursor: pointer;
+      background: linear-gradient(135deg, var(--accent) 0%, #1e293b 100%);
+      color: #ffffff;
+      font-size: 42px;
+      box-shadow: 0 16px 30px rgba(15, 23, 42, 0.25);
+      transition: transform 0.15s ease, background 0.15s ease;
+    }
+
+    .icon-button:active {
+      transform: scale(0.97);
+      background: linear-gradient(135deg, var(--accent-pressed) 0%, #475569 100%);
+    }
+
+    .title {
+      margin: 18px 0 8px;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .desc,
+    .status,
+    .target {
+      margin: 0;
+      line-height: 1.6;
+      font-size: 14px;
+      color: var(--subtle);
+      word-break: break-all;
+    }
+
+    .status {
+      margin-top: 16px;
+      min-height: 44px;
+    }
+
+    .target {
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <button id="openButton" class="icon-button" type="button" aria-label="Open Native Page">
+      GO
+    </button>
+    <h1 class="title">Open Native Page</h1>
+    <p class="desc">Click the icon to read targetid.txt and send the event to Android.</p>
+    <p id="targetText" class="target">Current targetid: loading...</p>
+    <p id="statusText" class="status">Waiting for click</p>
+  </main>
+
+  <script>
+    const TARGET_FILE = "./targetid.txt";
+    const targetText = document.getElementById("targetText");
+    const statusText = document.getElementById("statusText");
+    const openButton = document.getElementById("openButton");
+
+    async function readTargetId() {
+      const response = await fetch(TARGET_FILE + "?t=" + Date.now(), { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error("Failed to read targetid.txt, HTTP " + response.status);
+      }
+
+      const text = await response.text();
+      const targetId = text.trim();
+      if (!targetId) {
+        throw new Error("targetid.txt is empty");
+      }
+      return targetId;
+    }
+
+    function buildPayload(targetId) {
+      const url = "walmarthyper://app.page/marketing?targetid=" + encodeURIComponent(targetId);
+      return {
+        type: "openNativePage",
+        data: {
+          callback: "openNativePage",
+          url: url
+        }
+      };
+    }
+
+    function fireBrowserEvent(payload) {
+      window.dispatchEvent(new CustomEvent("openNativePage", { detail: payload }));
+    }
+
+    function sendToAndroid(payload) {
+      const message = JSON.stringify(payload);
+      let sent = false;
+
+      if (window.Android && typeof window.Android.openNativePage === "function") {
+        window.Android.openNativePage(message);
+        sent = true;
+      }
+
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.openNativePage) {
+        window.webkit.messageHandlers.openNativePage.postMessage(payload);
+        sent = true;
+      }
+
+      if (typeof window.postMessage === "function") {
+        window.postMessage(payload, "*");
+        sent = true;
+      }
+
+      fireBrowserEvent(payload);
+      return sent;
+    }
+
+    async function refreshTargetId() {
+      try {
+        const targetId = await readTargetId();
+        targetText.textContent = "Current targetid: " + targetId;
+        return targetId;
+      } catch (error) {
+        targetText.textContent = "Current targetid: read failed";
+        statusText.textContent = error.message;
+        throw error;
+      }
+    }
+
+    async function handleOpen() {
+      statusText.textContent = "Reading targetid...";
+
+      try {
+        const targetId = await readTargetId();
+        targetText.textContent = "Current targetid: " + targetId;
+
+        const payload = buildPayload(targetId);
+        const sent = sendToAndroid(payload);
+
+        statusText.textContent = sent
+          ? "Sent: " + payload.data.url
+          : "Payload created, but no native bridge detected: " + JSON.stringify(payload);
+      } catch (error) {
+        statusText.textContent = error.message;
+      }
+    }
+
+    openButton.addEventListener("click", handleOpen);
+    refreshTargetId();
+  </script>
+</body>
+</html>
